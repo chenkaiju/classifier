@@ -64,6 +64,30 @@ def conv2d_fixed_padding(inputs, filters, kernel_size, strides, name):
                                 kernel_initializer=tf.variance_scaling_initializer()
                                 )
 
+def block_bottleneck_v1(inputs, filters, strides, projection_shortcut, is_training, name):
+    with tf.name_scope(name) as scope:
+        shortcut = inputs
+        if projection_shortcut is not None:
+            shortcut = projection_shortcut(inputs)
+            shortcut = batch_norm(shortcut, is_training)
+
+        inputs = conv2d_fixed_padding(
+            inputs=inputs, filters=filters, kernel_size=1, strides=1, name='conv1')
+        inputs = batch_norm(inputs=inputs, is_training=is_training)
+        inputs = tf.nn.relu(features=inputs)
+
+        inputs = conv2d_fixed_padding(
+            inputs=inputs, filters=filters, kernel_size=3, strides=strides, name='conv2')
+        inputs = batch_norm(inputs=inputs, is_training=is_training)
+        inputs = tf.nn.relu(features=inputs)
+
+        inputs = conv2d_fixed_padding(
+            inputs=inputs, filters=4*filters, kernel_size=1, strides=1, name='conv3')
+        inputs = batch_norm(inputs=inputs, is_training=is_training)
+        inputs = tf.add(inputs, shortcut)
+        inputs = tf.nn.relu(features=inputs)
+
+        return inputs
 
 def block_v1(inputs, filters, strides, projection_shortcut, is_training, name):
     """A single block for ResNet v1, without a bottleneck.
@@ -105,10 +129,11 @@ def block_v1(inputs, filters, strides, projection_shortcut, is_training, name):
         return inputs
 
 
-def block_layer(inputs, filters, block_fn, blocks, strides, is_training, name):
+def block_layer(inputs, filters, bottleneck, block_fn, blocks, strides, is_training, name):
 
     with tf.name_scope(name) as scope:
-        filters_out = filters
+
+        filters_out = filters*4 if bottleneck else filters
 
         def projection_shortcut(inputs):
             return conv2d_fixed_padding(inputs, filters=filters_out, kernel_size=1, strides=strides, name='projection_shortcut')
@@ -141,12 +166,30 @@ def resnet_model_fn(features, labels, mode):
 
     inputs = tf.identity(inputs, 'initial_max_pool')
 
+    model_collection = {
+        '18': [2, 2, 2, 2],
+        '34': [3, 4, 6, 3],
+        '50': [3, 4, 6, 3],
+        '101': [3, 4, 6, 3],
+        '152': [3, 8, 36, 3]
+    }
+
+    model_type = '50'
+    model_layers=model_collection[model_type]
+
+    block_type = block_bottleneck_v1
+    bottleneck = True
+    if model_type=='18' or model_type=='34':
+        block_type = block_v1
+        bottleneck = False
+
     layer_num_filters = num_filters
-    for i, num_blocks in enumerate([3, 4, 6, 3]):
+    for i, num_blocks in enumerate(model_layers):
         layer_num_filters = num_filters * (2**i)
         inputs = block_layer(inputs=inputs,
                                 filters=layer_num_filters,
-                                block_fn=block_v1,
+                                bottleneck=bottleneck,
+                                block_fn=block_type,
                                 blocks=num_blocks,
                                 strides=2,
                                 is_training=is_training,
