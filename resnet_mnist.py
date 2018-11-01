@@ -192,14 +192,15 @@ def resnet_model_fn(features, labels, mode):
 
     # training mode
     if mode == tf.estimator.ModeKeys.TRAIN:
+
         optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
-        train_op = optimizer.minimize(
-            loss=loss,
-            global_step=tf.train.get_global_step()
-        )
-        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
-
-
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+            
+            train_op = optimizer.minimize(
+                loss=loss,
+                global_step=tf.train.get_global_step()
+            )
+            return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
 
 def main(unused_argv):
@@ -239,10 +240,10 @@ def main(unused_argv):
         batch_size=100,
         num_epochs=None,
         shuffle=True)
+
     mnist_classifier.train(
         input_fn=train_input_fn,
         steps=20000)
-        # hooks=[logging_hook])
 
   # Evaluate the model and print results
     eval_input_fn = tf.estimator.inputs.numpy_input_fn(
@@ -250,6 +251,7 @@ def main(unused_argv):
         y=eval_labels,
         num_epochs=1,
         shuffle=False)
+
     eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
     print(eval_results)
 
