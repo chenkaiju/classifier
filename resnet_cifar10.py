@@ -151,7 +151,11 @@ def block_layer(inputs, filters, bottleneck, block_fn, blocks, strides, is_train
 
 def resnet_model_fn(features, labels, mode):
 
-    inputs = tf.reshape(features["x"], [-1, 32, 32, 3])
+    inputs = tf.reshape(features["x"], [-1, 3, 32, 32])
+    inputs = tf.transpose(inputs, [0, 2, 3, 1])
+
+    #inputs = tf.pad(inputs, [[0,0],[4,4],[4,4],[0,0]], 'CONSTANT')
+    #inputs = tf.random_crop(inputs, [100, 32, 32, 3])
 
     tf.summary.image('inputs', inputs, max_outputs=10)
 
