@@ -150,6 +150,8 @@ def block_layer(inputs, filters, bottleneck, block_fn, blocks, strides, is_train
 def resnet_model_fn(features, labels, mode):
     inputs = tf.reshape(features["x"], [-1, 28, 28, 1])
 
+    tf.summary.image('inputs', inputs, max_outputs=10)
+
     is_training = True if (mode == tf.estimator.ModeKeys.TRAIN) else False
     num_filters = 64
 
