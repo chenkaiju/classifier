@@ -6,8 +6,9 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import os
+import functools
 
-import cifar10_data
+import cifar10_tfrecord as cifar10tf
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -151,15 +152,19 @@ def block_layer(inputs, filters, bottleneck, block_fn, blocks, strides, is_train
 
 def resnet_model_fn(features, labels, mode):
 
-    inputs = tf.reshape(features["x"], [-1, 3, 32, 32])
-    inputs = tf.transpose(inputs, [0, 2, 3, 1])
+    #inputs = tf.reshape(features["x"], [-1, 3, 32, 32])
+    #inputs = tf.transpose(inputs, [0, 2, 3, 1])
 
     #inputs = tf.pad(inputs, [[0,0],[4,4],[4,4],[0,0]], 'CONSTANT')
     #inputs = tf.random_crop(inputs, [100, 32, 32, 3])
+    inputs = features
+
+    inputs = tf.Print(inputs, [tf.shape(inputs)], message='debug: ')
 
     tf.summary.image('inputs', inputs, max_outputs=10)
 
     is_training = True if (mode == tf.estimator.ModeKeys.TRAIN) else False
+    
     num_filters = 64
 
     inputs = conv2d_fixed_padding(
@@ -183,7 +188,7 @@ def resnet_model_fn(features, labels, mode):
         '152': [3, 8, 36, 3]
     }
 
-    model_type = '101'
+    model_type = '50'
     model_layers=model_collection[model_type]
 
     block_type = block_bottleneck_v1
@@ -255,57 +260,62 @@ def resnet_model_fn(features, labels, mode):
             return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
 
+def input_fn(data_dir,
+             subset,
+             batch_size,
+             use_distortion_for_training=True,
+             repeat=None):
+    """Create input graph for model.
+    Args:
+    data_dir: Directory where TFRecords representing the dataset are located.
+    subset: one of 'train', 'validate' and 'eval'.
+    num_shards: num of towers participating in data-parallel training.
+    batch_size: total batch size for training to be divided by the number of
+    shards.
+    use_distortion_for_training: True to use distortions.
+    Returns:
+    two lists of tensors for features and labels, each of num_shards length.
+    """
+    with tf.device('/cpu:0'):
+        use_distortion = (subset == 'train')
+        dataset = cifar10tf.Cifar10DataSet(data_dir, subset, use_distortion, repeat)
+        image_batch, label_batch = dataset.make_batch(batch_size)
+        
+        return image_batch, label_batch
+
 def main(unused_argv):
 
     root_path = os.path.dirname(os.path.abspath(__file__))
     data_folder = os.path.join(root_path, 'cifar10-data')
-    cifar10_data.maybe_download_and_extract(data_folder)
-    data_folder = os.path.join(data_folder, 'cifar-10-batches-py')
-
-    cifar10 = cifar10_data.load_dataset(data_folder)
-    train_data = cifar10["images_train"]  # Returns np.array
-    train_labels = np.asarray(cifar10["labels_train"], dtype=np.int32)
-    eval_data = cifar10["images_test"]  # Returns np.array
-    eval_labels = np.asarray(cifar10["labels_test"], dtype=np.int32)
+    data_folder = os.path.join(data_folder, 'cifar-10-batches-tfrecord')
 
 
 # #     root_path = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(root_path, 'resnet_cifar10')
+    model_path = os.path.join(model_path, 'resnet50')
 #     print('model path: ', model_path)
     # Create the Estimator
     cifar10_classifier = tf.estimator.Estimator(model_fn=resnet_model_fn, model_dir=model_path)
 
-#   # Set up logging for predictions
-#   # Log the values in the "Softmax" tensor with label "probabilities"
-#     #tensors_to_log = {"probabilities": "softmax_tensor"}
-#     # logging_hook = tf.train.LoggingTensorHook(
-#     #     tensors=tensors_to_log, every_n_iter=50)
-
-#     log_path = os.path.join(model_path, 'log')
-#     print('log path: ', log_path)
-
-#     # summary_hook = tf.train.SummarySaverHook(
-#     #     save_steps=50,
-#     #     output_dir=log_path,
-#     #     scaffold=tf.train.Scaffold(summary_op=tf.summary.merge_all())
-#     # )
-
     #Train the model
-    train_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": train_data},
-        y=train_labels,
+    train_input_fn = functools.partial(
+        input_fn,
+        data_folder,
+        subset='train',
         batch_size=100,
-        num_epochs=None,
-        shuffle=True)
+        use_distortion_for_training=True,
+        repeat=None)
 
     cifar10_classifier.train(input_fn=train_input_fn, steps=20000)
 
-  # Evaluate the model and print results
-    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": eval_data},
-        y=eval_labels,
-        num_epochs=1,
-        shuffle=False)
+    #Evaluate the model and print results
+    eval_input_fn = functools.partial(
+        input_fn,
+        data_folder,
+        subset='eval',
+        batch_size=100,
+        use_distortion_for_training=False,
+        repeat=1)
 
     eval_results = cifar10_classifier.evaluate(input_fn=eval_input_fn)
     print(eval_results)
